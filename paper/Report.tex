@@ -1,0 +1,73 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+%\title{How Safe is C to Rust Translation Using LLMs}
+\title{How Safe is C to Rust Translation Using LLMs}
+
+\author{\IEEEauthorblockN{Joshua Ibrom}
+\IEEEauthorblockA{\textit{Dept. of CEMS} \\
+\textit{Texas A\&M University - San Antonio}\\
+San Antonio, US \\
+jibro01@jaguar.tamu.edu}
+\and
+\IEEEauthorblockN{Kenneth Fulton}
+\IEEEauthorblockA{\textit{Dept. of CEMS} \\
+\textit{Texas A\&M University - San Antonio}\\
+San Antonio, US \\
+email address or ORCID}
+}
+
+\maketitle
+
+\begin{abstract}
+Lorem ipsum.
+\end{abstract}
+
+\begin{IEEEkeywords}
+programming language translation, ai safety
+\end{IEEEkeywords}
+
+\section{Background}
+Traditional systems-level programming of embedded software, operating systems,
+and other low-level applications has been done with language such as C so that
+memory and other system components may be managed by the programmer as needed.
+With this form of programming also comes the potential for pitfalls that leave
+applications ``open to exploits, crashes, or corruption'' 
+\cite{klabnik2018rust_book}. With the increasing popularity of Rust, a
+systems-level programming language promising safety from the common C / C++
+pitfalls, there is now the question of how we might perform some re-write of
+critical system software from their potentially insecure C versions to ones
+written in Rust \cite{klabnik2018rust_book, emre2021translating}.
+
+One such method of performing a re-write of some codebase is to attempt to
+hand-roll a new version of that software by manually translating line-by-line
+given C code to Rust code---a method that is time consuming, expensive, and
+may lead to there being missing or incorrectly-implemented blocks of code.
+Another such approach that has now become far more feasible with the
+prevalence and advanced reasoning abilities of \textit{large language models}
+(LLMs) is to use those LLMs to perform automatic translation with human
+verification.
+
+\subsection{Research Questions}
+
+\section{Related Work}
+
+\section{Proposed Approach}
+
+\section{Experimentation}
+
+\section{Experiment Outcomes and Observations}
+
+\section{Conclusion}
+
+\bibliographystyle{IEEEtran}
+\bibliography{paper/sources}
+\end{document}
