@@ -6,4 +6,4 @@ here.
 
 ## Files
 
-- `filename.c`: Description of the error in this file.
+- `hello.c`: Contains no errors but rather serves as a test file for ChatGPT API queries.
