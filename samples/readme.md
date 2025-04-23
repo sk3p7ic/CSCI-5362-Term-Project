@@ -12,3 +12,6 @@ here.
   - Does not allocate a properly-sized buffer `buff` (should be `strlen(msg) + 1`).
   - Does not check that pointer `buff` was initialized properly and is not `NULL`.
   - Does not free the memory.
+- `mysh-ji.c`: Josh's implementation for CSCI 5362 A1.
+- `lslong-ji.c`: Josh's implementation for CSCI 5362 A2.
+- `prodcon-ji.c`: Josh's implementation for CSCI 5362 A3.
