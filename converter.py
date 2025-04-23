@@ -84,6 +84,6 @@ if __name__ == '__main__':
                            pc)
     else:
         for fname in os.listdir(pc.inputPath):
-            if os.path.isdir(fname):
+            if os.path.isdir(fname) or fname.endswith('.md'):
                 continue
             translate_and_save(fname, pc.inputPath, pc)
