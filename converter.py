@@ -36,6 +36,7 @@ def translate(code: str, config: ProgramConfig) -> str:
 def get_output_name(fname: str, config: ProgramConfig) -> str:
     if config.keepErrors:
         fname = 'unsure-' + fname
+    fname = fname.replace('.c', '.rs')
     return f'{config.outputDir}/{fname}'
 
 
