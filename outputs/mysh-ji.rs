@@ -1,18 +1,18 @@
 use std::io::{self, Write};
-use std::process::{Command, Stdio};
+use std::process::{Command, exit};
 use std::ptr;
-use std::ffi::{CString, CStr};
 use std::os::unix::process::CommandExt;
+use std::ffi::{CString, CStr};
 
 fn expect<T>(ptr: Option<T>, msg: &str) {
     if ptr.is_none() {
         eprintln!("{}", msg);
-        std::process::exit(1);
+        exit(1);
     }
 }
 
-fn buflen(str: &str) -> usize {
-    str.len() + 1
+fn buflen(s: &str) -> usize {
+    s.len() + 1
 }
 
 fn prompt() {
@@ -20,25 +20,22 @@ fn prompt() {
     io::stdout().flush().unwrap();
 }
 
-fn prompt_cmd(cmd: &str) {
-    println!("mysh% {}", cmd);
-}
-
 fn get_next_command(last_command: Option<&str>) -> Option<String> {
     let mut cmd_buf = String::new();
     prompt();
 
-    io::stdin().read_line(&mut cmd_buf).expect("Failed to read line");
+    if io::stdin().read_line(&mut cmd_buf).is_err() {
+        return None;
+    }
 
-    let cmd_buf = cmd_buf.trim_end(); // Remove trailing newline
+    let cmd_buf = cmd_buf.trim_end();
 
-    // If the user would like to run the last-run command
     if cmd_buf == "!!" {
-        if let Some(last) = last_command {
-            prompt_cmd(last);
-            return Some(last.to_string());
+        if let Some(last_cmd) = last_command {
+            println!("mysh% {}", last_cmd);
+            return Some(last_cmd.to_string());
         } else {
-            println!("No commands in history.");
+            eprintln!("No commands in history.");
             return None;
         }
     }
@@ -47,37 +44,39 @@ fn get_next_command(last_command: Option<&str>) -> Option<String> {
 }
 
 fn get_n_spaces(s: &str) -> usize {
-    s.matches(' ').count()
+    s.chars().filter(|&c| c == ' ').count()
 }
 
-fn tokenize(s: &str, max_tokens: usize) -> Vec<Option<String>> {
-    let mut tokens = Vec::with_capacity(max_tokens);
-    let mut curr = s.split_whitespace();
-    
-    for token in curr {
-        tokens.push(Some(token.to_string()));
+fn tokenize(s: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut iter = s.split_whitespace().peekable();
+
+    while let Some(token) = iter.next() {
+        if token.starts_with('"') && token.ends_with('"') && token.len() > 1 {
+            tokens.push(token[1..token.len()-1].to_string());
+        } else {
+            tokens.push(token.to_string());
+        }
     }
 
-    tokens.push(None); // Null terminate the array
     tokens
 }
 
-fn execute(n_args: usize, args: Vec<Option<String>>) {
-    expect(args.get(0), "Command argument cannot be null");
+fn execute(args: Vec<String>) {
+    let mut command = Command::new(&args[0]);
+    let args_slice: Vec<&str> = args.iter().skip(1).map(|s| s.as_str()).collect();
 
-    let do_wait = match args.get(n_args - 2) {
-        Some(Some(arg)) => arg != "&",
-        _ => true,
+    let do_wait = if args_slice.last() == Some(&"&") {
+        command.arg("&");
+        false 
+    } else {
+        true
     };
 
-    let args: Vec<String> = args.iter().filter_map(|s| s.as_ref()).cloned().collect();
-    let mut command = Command::new(&args[0]);
+    let child = command.spawn().expect("Failed to start command");
 
-    command.args(&args[1..]);
-    if !do_wait {
-        command.spawn().expect("Error running child process");
-    } else {
-        let _ = command.output().expect("Error");
+    if do_wait {
+        let _ = child.wait().expect("Command wasn't running");
     }
 }
 
@@ -87,15 +86,13 @@ fn main() {
     loop {
         if let Some(cmd_buf) = get_next_command(last_command.as_deref()) {
             last_command = Some(cmd_buf.clone());
-
-            // If the user would like to exit
             if cmd_buf == "exit" {
                 break;
             }
 
             let n_args = get_n_spaces(&cmd_buf) + 1;
-            let cmd_args = tokenize(&cmd_buf, n_args);
-            execute(n_args, cmd_args);
+            let cmd_args = tokenize(&cmd_buf);
+            execute(cmd_args);
         }
     }
 }

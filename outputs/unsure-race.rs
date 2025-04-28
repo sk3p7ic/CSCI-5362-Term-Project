@@ -1,28 +1,24 @@
-use std::sync::Arc;
 use std::thread;
 
 const NUM_THREADS: usize = 1_000_000;
 
 // Shared variable
-struct SharedCounter {
-    counter: usize,
-}
+static mut COUNTER: i32 = 0;
 
-fn increment_counter(shared: Arc<SharedCounter>) {
+// Thread function
+fn increment_counter() {
     // Increment the counter
-    shared.counter += 1;
+    unsafe {
+        COUNTER += 1;
+    }
 }
 
 fn main() {
-    let shared = Arc::new(SharedCounter { counter: 0 });
     let mut handles = vec![];
 
     // Create threads
     for _ in 0..NUM_THREADS {
-        let shared_clone = Arc::clone(&shared);
-        let handle = thread::spawn(move || {
-            increment_counter(shared_clone);
-        });
+        let handle = thread::spawn(increment_counter);
         handles.push(handle);
     }
 
@@ -32,5 +28,7 @@ fn main() {
     }
 
     // Print final value of counter
-    println!("Final counter value: {}", shared.counter);
+    unsafe {
+        println!("Final counter value: {}", COUNTER);
+    }
 }

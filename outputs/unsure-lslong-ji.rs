@@ -1,119 +1,145 @@
 use std::ffi::{CString, CStr};
 use std::fs::{self, File};
 use std::io::{self, Write};
+use std::libc::{self, c_void, c_char, stat, S_IFMT, S_IFREG, S_IFDIR, S_IFCHR, S_IFBLK};
 use std::os::unix::fs::MetadataExt;
-use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
 use std::ptr;
-use std::time::{UNIX_EPOCH, SystemTime};
-use std::process::exit;
-use std::string::ToString;
+use std::time::{SystemTime,UNIX_EPOCH};
 
-#[inline]
+/// Ensures that a given pointer `ptr` is not null. If it is, it prints `msg` and exits.
+macro_rules! expect {
+    ($ptr:expr, $msg:expr) => {
+        if $ptr.is_null() {
+            eprintln!("{}", $msg);
+            std::process::exit(1);
+        }
+    };
+}
+
+/// Converts a given UID `uid` to a Rust string of its name, if one exists.
 fn uid_str(uid: u32) -> &'static str {
-    match users::get_user_by_uid(uid) {
-        Some(user) => user.name().to_str().unwrap_or("Unknown"),
-        None => "Unknown",
+    unsafe {
+        let pw = libc::getpwuid(uid);
+        if pw.is_null() {
+            return "Unknown";
+        }
+        CStr::from_ptr((*pw).pw_name).to_string_lossy().into_owned().as_str()
     }
 }
 
-#[inline]
+/// Converts a given GID `gid` to a Rust string of its name, if one exists.
 fn gid_str(gid: u32) -> &'static str {
-    match users::get_group_by_gid(gid) {
-        Some(group) => group.name().to_str().unwrap_or("Unknown"),
-        None => "Unknown",
+    unsafe {
+        let grp = libc::getgrgid(gid);
+        if grp.is_null() {
+            return "Unknown";
+        }
+        CStr::from_ptr((*grp).gr_name).to_string_lossy().into_owned().as_str()
     }
 }
 
-#[inline]
-fn permbits_to_chars(permission_value: u32) -> String {
-    let mut chars = String::from("---");
-    if permission_value & 0b100 != 0 {
-        chars.replace_range(0..1, "r");
+/// Writes the appropriate "rwx" values to a given buffer `str` having at least 3 characters.
+fn permbits_to_chars(permission_value: u32, str: &mut [u8; 4]) {
+    if str.len() < 4 {
+        eprintln!("Not enough characters in string (Expected >= 3, Got {})", str.len());
+        return;
     }
-    if permission_value & 0b010 != 0 {
-        chars.replace_range(1..2, "w");
-    }
-    if permission_value & 0b001 != 0 {
-        chars.replace_range(2..3, "x");
-    }
-    chars
+    str[0] = if (permission_value & 4) != 0 { b'r' } else { b'-' };
+    str[1] = if (permission_value & 2) != 0 { b'w' } else { b'-' };
+    str[2] = if (permission_value & 1) != 0 { b'x' } else { b'-' };
 }
 
-fn get_filemode(mode: u32) -> String {
-    let mut bits = String::from("----------");
-
+/// For some `mode`, converts it to a Rust string representation of the file type and permissions.
+fn get_file_mode(mode: u32) -> String {
+    let mut bits = vec![b'-'; 11];
+    
     // Get the type
-    match mode & 0o170000 {
-        0o100000 => bits.replace_range(0..1, "-"), // Regular file
-        0o40000 => bits.replace_range(0..1, "d"),  // Directory
-        0o20000 => bits.replace_range(0..1, "c"),  // Char I/O device
-        0o60000 => bits.replace_range(0..1, "b"),  // Blk I/O device
-        _ => bits.replace_range(0..1, "?"),         // Other types
-    }
-
-    // Get permission values for owner, group, and others
-    bits.replace_range(1..4, &permbits_to_chars((mode >> 6) as u32));
-    bits.replace_range(4..7, &permbits_to_chars((mode >> 3) as u32));
-    bits.replace_range(7..10, &permbits_to_chars(mode as u32));
-
-    bits
+    bits[0] = match mode & S_IFMT {
+        S_IFREG => b'-',
+        S_IFDIR => b'd',
+        S_IFCHR => b'c',
+        S_IFBLK => b'b',
+        _ => b'?',
+    };
+    
+    // Get the permission values for owner, group, and others
+    permbits_to_chars((mode >> 6) as u32, &mut bits[1..]);
+    permbits_to_chars((mode >> 3) as u32, &mut bits[4..]);
+    permbits_to_chars(mode as u32, &mut bits[7..]);
+    
+    String::from_utf8(bits).expect("Invalid UTF-8")
 }
 
-fn display_file_info(fname: &str, metadata: &fs::Metadata) {
-    print!("{}", get_filemode(metadata.mode()));
-    print!("{:4} ", metadata.nlink());
-    print!("{:<8} ", uid_str(metadata.uid()));
-    print!("{:<8} ", gid_str(metadata.gid()));
-    print!("{:8} ", metadata.len());
-    print!("{:.12} ", format!("{:?}", SystemTime::now() - metadata.modified().unwrap_or(UNIX_EPOCH)));
+/// Displays information about a file `fname` with file information `info`.
+fn display_file_info(fname: &str, info: &libc::stat) {
+    print!("{}", get_file_mode(info.st_mode));
+    print!("{:4} ", info.st_nlink);
+    print!("{:<8} ", uid_str(info.st_uid));
+    print!("{:<8} ", gid_str(info.st_gid));
+    print!("{:8} ", info.st_size);
+    let modified_time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(info.st_mtime as u64);
+    if let Ok(datetime) = modified_time.duration_since(UNIX_EPOCH) {
+        let formatted_time = datetime.as_secs();
+        print!("{:.12} ", formatted_time);
+    }
     println!("{}", fname);
 }
 
+/// A struct to represent the result of the `stat_file` function.
 struct StatFileResult {
-    info: fs::Metadata,
+    info: libc::stat,
     ok: bool,
 }
 
-fn stat_file(dirname: &Path, fname: &str) -> StatFileResult {
-    let full_path = dirname.join(fname);
-    match full_path.metadata() {
-        Ok(info) => StatFileResult { info, ok: true },
-        Err(_) => {
-            StatFileResult { info: fs::File::open(full_path).unwrap().metadata().unwrap(), ok: false }
+/// Retrieves information about a file if such a file exists.
+fn stat_file(dirname: &str, fname: &str) -> StatFileResult {
+    let mut res = StatFileResult {
+        info: unsafe { std::mem::zeroed() },
+        ok: false,
+    };
+    
+    let full_path = format!("{}/{}", dirname, fname);
+    if unsafe { libc::stat(full_path.as_ptr() as *const c_char, &mut res.info) } == -1 {
+        // If the file still cannot be stat'd
+        if unsafe { libc::stat(full_path.as_ptr() as *const c_char, &mut res.info) } == -1 {
+            eprintln!("{}: {}", fname, io::Error::last_os_error());
+            res.ok = false;
+            return res;
         }
     }
+    res.ok = true;
+    return res;
 }
 
+/// Displays a listing of files contained in `dirname`.
 fn display_dir(dirname: &str) {
-    let dir = fs::read_dir(dirname);
-    match dir {
-        Ok(entries) => {
-            for entry in entries.filter_map(Result::ok) {
-                let stat_res = stat_file(Path::new(dirname), entry.file_name().to_str().unwrap());
-                if stat_res.ok {
-                    display_file_info(entry.file_name().to_str().unwrap(), &stat_res.info);
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("Cannot open directory '{}': {}", dirname, e);
+    let entries = fs::read_dir(dirname).unwrap_or_else(|_| {
+        eprintln!("Cannot open directory '{}'", dirname);
+        std::process::exit(1);
+    });
+    
+    for entry in entries.filter_map(Result::ok) {
+        let fname = entry.file_name().into_string().unwrap(); // Potentially unsafe
+        let stat_res = stat_file(dirname, &fname);
+        if stat_res.ok {
+            display_file_info(&fname, &stat_res.info);
         }
     }
 }
 
 fn main() {
-    let args: Vec<_> = std::env::args().collect();
-
+    let args: Vec<String> = std::env::args().collect();
+    
     if args.len() == 1 {
         display_dir(".");
-        exit(0);
+        return;
     }
 
-    for arg in &args[1..] {
-        println!("{}:", arg);
-        display_dir(arg);
-        if arg != args.last().unwrap() {
+    for dir in &args[1..] {
+        println!("{}:", dir);
+        display_dir(dir);
+        // If there's still more directories to list, add a blank line
+        if dir != args.last().unwrap() {
             println!();
         }
     }

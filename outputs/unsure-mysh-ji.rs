@@ -1,153 +1,148 @@
+use std::ffi::{CString, c_void};
 use std::io::{self, Write};
-use std::ffi::CString;
-use std::ptr;
-use std::process::{Command, exit};
-use std::os::unix::process::CommandExt;
 use std::mem;
+use std::ptr;
+use std::os::unix::process::CommandExt;
+use std::process::{Command, exit};
 use std::ptr::null_mut;
+use std::os::raw::c_char;
 
-/// Ensures that a given pointer `ptr` is not null. Prints `msg` and associated
-/// error information, if any, and exits with `EXIT_FAILURE`.
-macro_rules! expect {
-    ($ptr:expr, $msg:expr) => {
-        if $ptr.is_null() {
-            eprintln!("{}", $msg);
-            exit(1);
-        }
-    };
+fn expect<T>(ptr: *const T, msg: &str) {
+    if ptr.is_null() {
+        eprintln!("{}", msg);
+        std::process::exit(1);
+    }
 }
 
-/// Calculates the size of a buffer, accounting for the null terminator (`\0`)
-macro_rules! buflen {
-    ($str:expr) => {
-        $str.len() + 1
-    };
+fn buflen(str_ptr: *const c_char) -> usize {
+    unsafe { libc::strlen(str_ptr) + 1 }
 }
 
-/// Displays the shell prompt
-macro_rules! prompt {
-    () => {
-        print!("mysh% ");
-        io::stdout().flush().unwrap();
-    };
+fn prompt() {
+    print!("mysh%% ");
+    io::stdout().flush().unwrap();
 }
 
-/// Displays the shell prompt with a command
-macro_rules! prompt_cmd {
-    ($cmd:expr) => {
-        println!("mysh% {}", $cmd);
-    };
+fn prompt_cmd(cmd: &str) {
+    println!("mysh%% {}", cmd);
 }
 
-/// Gets the next command from the user.
 fn get_next_command(last_command: Option<&str>) -> Option<String> {
-    let mut cmd_buf_size = 16; // Initial size of the buffer
-    let mut cmd_buf: Vec<u8> = Vec::with_capacity(cmd_buf_size);
-
-    prompt!();
-
-    // Get the input from the user
-    // This is done char-by-char to allow for the dynamic buffer size
+    let mut cmd_buf = Vec::with_capacity(16);
     let mut idx = 0;
-    loop {
-        let mut buf = [0u8; 1];
-        if io::stdin().read_exact(&mut buf).is_err() {
+
+    prompt();
+
+    while let Some(c) = getc() {
+        if c == '\n' {
             break;
         }
-        if buf[0] == b'\n' {
-            break; // End on newline
+        if idx + 1 >= cmd_buf.capacity() {
+            cmd_buf.reserve(cmd_buf.capacity());
         }
-
-        // If the input buffer needs to be bigger
-        if idx + 1 >= cmd_buf_size {
-            cmd_buf_size *= 2;
-            cmd_buf.resize(cmd_buf_size, 0);
-        }
-
-        cmd_buf[idx] = buf[0]; // Save this character to the buffer
+        cmd_buf.push(c);
         idx += 1;
     }
-    cmd_buf.truncate(idx); // Keep only the valid input
+    cmd_buf.push('\0'); // Null terminate
 
-    // Ensure that the command string is null-terminated and convert to String
-    let command_str = String::from_utf8(cmd_buf).ok()?;
-    
-    // If the user would like to run the last-run command
-    if command_str == "!!" {
-        if let Some(last) = last_command {
-            prompt_cmd!(last);
-            return Some(last.to_string());
+    let cmd_str = unsafe { CString::from_vec_unchecked(cmd_buf).into_string().unwrap() };
+
+    if cmd_str == "!!" {
+        if let Some(last_cmd) = last_command {
+            let command_buf = CString::new(last_cmd).expect("Could not create CString from last command");
+            prompt_cmd(command_buf.to_str().unwrap());
+            return Some(last_cmd.to_string());
         } else {
             println!("No commands in history.");
             return None;
         }
     }
 
-    Some(command_str)
+    Some(cmd_str)
 }
 
-/// Gets the number of spaces found in a string.
-fn get_n_spaces(str: &str) -> usize {
-    str.matches(' ').count()
+fn get_n_spaces(s: &str) -> usize {
+    s.chars().filter(|&c| c == ' ').count()
 }
 
-/// Tokenizes a given string into an array of tokens. Quoted strings are
-/// parsed as a single string literal token.
-fn tokenize(str: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
+fn tokenize(input: &str, strs: &mut Vec<*mut c_char>) -> usize {
+    let to_parse = CString::new(input).expect("Could not create CString");
+    let to_parse_ptr = to_parse.as_ptr() as *mut c_char;
 
-    for c in str.chars() {
-        match c {
-            '"' => in_quotes = !in_quotes,
-            ' ' if !in_quotes => {
-                if !current.is_empty() {
-                    tokens.push(current.clone());
-                    current.clear();
+    let mut curr = to_parse_ptr;
+    let mut idx = 0;
+
+    // Parse tokens
+    unsafe {
+        while *curr != b'\0' {
+            while *curr == b' ' {
+                curr = curr.add(1);
+            }
+            if *curr == b'\0' { break; }
+
+            let token_start = curr;
+            let is_quoted = *curr == b'"';
+
+            if is_quoted {
+                curr = curr.add(1); // Skip the opening quote
+                while *curr != b'"' && *curr != b'\0' {
+                    curr = curr.add(1);
+                }
+                if *curr == b'"' {
+                    *curr = b'\0'; // Null terminate for strcpy
+                    curr = curr.add(1);
+                }
+            } else {
+                while *curr != b' ' && *curr != b'\0' {
+                    curr = curr.add(1);
+                }
+                if *curr != b'\0' {
+                    *curr = b'\0'; // Null terminate for strcpy
+                    curr = curr.add(1);
                 }
             }
-            _ => current.push(c),
+
+            let token_str = CString::from_raw(token_start);
+            strs.push(token_str.into_raw());
+            idx += 1;
+        }
+
+        strs.push(ptr::null_mut()); // Terminate the array
+    }
+    idx
+}
+
+fn execute(n_args: usize, args: Vec<*mut c_char>) {
+    expect(args[0], "Command argument cannot be null");
+
+    let do_wait = unsafe { *args[n_args - 2] != b'&' as i8 };
+    let args = if do_wait {
+        args
+    } else {
+        let mut args = args.clone();
+        args[n_args - 2] = ptr::null_mut();
+        args
+    };
+
+    let pid = unsafe { libc::fork() };
+
+    match pid {
+        -1 => expect(null_mut(), "Error running child process"),
+        0 => {
+            let _ = unsafe { libc::execvp(args[0], args.as_ptr() as *mut _) };
+            expect(null_mut(), "Error");
+        },
+        _ => {
+            if do_wait {
+                let mut exit_status = 0;
+                unsafe { libc::wait(&mut exit_status) };
+            }
         }
     }
-    
-    if !current.is_empty() {
-        tokens.push(current);
-    }
 
-    tokens
-}
-
-/// Executes a given command. Supports asynchronously running commands.
-fn execute(n_args: usize, args: Vec<String>) {
-    if n_args == 0 {
-        return;
-    }
-
-    let async_mode = *args.last().unwrap() != "&";
-    let command = &args[0];
-    let args: Vec<CString> = args.iter().map(|arg| CString::new(arg.clone()).unwrap()).collect();
-
-    unsafe {
-        let pid = libc::fork();
-
-        match pid {
-            -1 => {
-                eprintln!("Error running child process");
-                exit(1);
-            },
-            0 => {
-                // Convert to raw pointers for execvp
-                let argv: Vec<*const libc::c_char> = args.iter().map(|s| s.as_ptr()).collect();
-                execvp(command.as_ptr() as *const _, argv.as_ptr() as *const _);
-                eprintln!("Error");
-                exit(1);
-            },
-            _ => {
-                if async_mode {
-                    libc::waitpid(pid, ptr::null_mut(), 0);
-                }
-            }
+    for arg in args {
+        if !arg.is_null() {
+            unsafe { libc::free(arg as *mut c_void) };
         }
     }
 }
@@ -157,18 +152,28 @@ fn main() {
 
     loop {
         let cmd_buf = get_next_command(last_command.as_deref());
-
         if let Some(cmd) = cmd_buf {
             last_command = Some(cmd.clone());
 
             if cmd == "exit" {
-                return;
+                if let Some(ref cmd) = last_command {
+                    println!("Exiting... Command: {}", cmd);
+                }
+                exit(0);
             }
 
             let n_args = get_n_spaces(&cmd) + 1;
-            let cmd_args = tokenize(&cmd);
-
+            let mut cmd_args: Vec<*mut c_char> = Vec::new();
+            tokenize(&cmd, &mut cmd_args);
             execute(n_args, cmd_args);
         }
     }
+}
+
+fn getc() -> Option<char> {
+    let mut buffer = [0; 1];
+    if std::io::stdin().read(&mut buffer).unwrap() == 0 {
+        return None;
+    }
+    Some(buffer[0] as char)
 }

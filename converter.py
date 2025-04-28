@@ -18,7 +18,7 @@ class ProgramConfig:
 
 def translate(code: str, config: ProgramConfig) -> str:
     prompt = 'Please convert the following C code to Rust code'
-    if not pc.keepErrors:
+    if pc.keepErrors:
         prompt += ' while maintaining all memory safety errors, if possible'
     prompt += f'''
     ```c
