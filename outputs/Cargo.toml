@@ -1,0 +1,13 @@
+[package]
+name = "translations"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "hello"
+path = "./hello.rs"
+
+[[bin]]
+name = "hello-unsure"
+path = "./unsure-hello.rs"
+
