@@ -53,6 +53,9 @@ def save(code: str, fname: str, config: ProgramConfig):
 
 
 def translate_and_save(fname: str, fpath: str, config: ProgramConfig):
+    if str(os.path.splitext(fname)[1].lower()) != '.c':
+        print(f'{fname} is not a C file. Skipping.')
+        return
     print('Translating \'{}\' -> \'{}\''.format(pc.inputPath,
                                                 get_output_name(fname,
                                                                 pc)))
