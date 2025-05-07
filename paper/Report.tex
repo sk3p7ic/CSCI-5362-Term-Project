@@ -7,9 +7,17 @@
 \usepackage{xcolor}
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\usepackage[newfloat]{minted}
+\usepackage{caption}
+
+\setminted{fontsize=\footnotesize, breaklines}
+
+\newenvironment{code}{\captionsetup{type=listing}}{}
+\SetupFloatingEnvironment{listing}{name=Source Code}
+
 \begin{document}
 
-%\title{How Safe is C to Rust Translation Using LLMs}
 \title{How Safe is C to Rust Translation Using LLMs?}
 
 \author{
@@ -67,7 +75,7 @@ verification.
 
 \subsection{Research Questions}
 \begin{enumerate}
-    \item How reliably can LLMs resolve memory safety errors when converting 
+    \item Can LLMs resolve memory safety errors when converting 
         C code to Rust?
     \item How efficiently can LLMs translate C code to Rust?
     \item How can you prove that Rust code is safe?
@@ -88,9 +96,6 @@ In this experiment, we created C code with memory errors and collected samples f
 \end{figure}
 
 
-\section{Experimentation}
-
--+
 \section{Experiment Outcomes and Observations}
 
 \begin{figure}
@@ -103,10 +108,41 @@ In this experiment, we created C code with memory errors and collected samples f
 Several recurring issues were observed during the C-to-Rust conversion process. Common problems included mismatched types, particularly in function arguments and return values, as well as missing dependencies, where files attempted to use crates such as \texttt{libc}, \texttt{chrono}, and \texttt{users} without proper linkage or inclusion in the \texttt{Cargo.toml} file. This was circumvented in part by adding a list of common crates to the \texttt{Cargo.toml} file referenced by the python testing script. These included \texttt{serde}, \texttt{tokio}, \texttt{anyhow}, \texttt{thiserror}, \texttt{lazy\_static}, \texttt{log}, \texttt{once\_cell}, \texttt{rayon}, \texttt{derive\_builder}, \texttt{libc}, \texttt{users} and \texttt{chrono}. Additionally, runtime panics frequently occurred due to memory-related errors, index out-of-bounds violations, or thread-related issues. Furthermore, many generated Rust files triggered warnings related to unused imports, unused variables, or the use of deprecated methods.
 
 In some instances, such as Rust code samples which were generated using the Unsafe Prompt, these errors were to be expected. For
-example, the code shown
+example, the code shown in Listing \ref{lst:trans-cwe-787} generated using the Unsafe Prompt contains an assignment to an index
+greater than the defined capacity of the \texttt{id\_sequence} array which then results in a compilation error---an issue that a
+C compiler likely would not catch, leading to undefined behavior. Through this example, we might also observe how the LLM caught
+the issue and expanded the size of the array to accommodate the extra element.
 
+\begin{code}
+    \vspace{1em}
+    \centering
+    Original C Code:
+    \inputminted{c}{../samples/cwe-787.c}
+    
+    Rust Code Generated using the Safe Prompt:
+    \inputminted{rust}{../outputs/cwe-787.rs}
+    
+    Rust Code Generated using the Unsafe Prompt:
+    \inputminted{rust}{../outputs/unsure-cwe-787.rs}
+    \captionof{listing}{C Code and its Translated Rust Code}
+    \label{lst:trans-cwe-787}
+    \vspace{1em}
+\end{code}
+
+Other samples of generated Rust code, even for those which were generated using the Safe Prompt, did not fit within the scope of
+being idempotent, leaving there to be the potential of memory errors are C strings are still used in place of Rust string slices
+and copies.
 
 \section{Conclusion}
+From our research we have been able to find that there does exist the potential of using LLMs to translate code from C, a
+language which in modern times has been referred to as ``unsafe'', to Rust which has appeared to be elevated to a status of being
+the new standard for developing ``safe'' applications. Large language models do appear to understand the context of more basic C
+code and are able to translate that code with relative safety even when not strictly prompted to do so. However, other methods of
+translation must still be considered, such as requesting that the code be more idiomatic or providing some entirely different
+representation of the C code to the LLM, such as an abstract syntax tree (AST) or intermediate representation (IR). Moreover,
+further research must be determine methods to verifiably prove that a given sample of Rust code is ``safe'', at least within a
+general margin of safety. There is much promise in cross-programming language translation and therefore there is also still more
+work to be done to guarantee safer methods of refactoring and rebuilding potentially unsafe legacy codebases.
 
 \bibliographystyle{IEEEtran}
 \bibliography{paper/sources}
